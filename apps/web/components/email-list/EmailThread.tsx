@@ -9,6 +9,12 @@ import { useAccount } from "@/providers/EmailAccountProvider";
 import { useReplyDrafts } from "@/hooks/useReplyDrafts";
 import { ThreadDeliveryStatus } from "@/components/email-list/ThreadDeliveryStatus";
 import { Button } from "@/components/ui/button";
+import {
+  getReplyDraftMode,
+  getReplyDraftSessionId,
+  type ReplyDraftMode,
+} from "@/utils/email-cache/reply-drafts";
+import type { StoredReplyDraft } from "@/utils/email-cache/database";
 
 export function EmailThread({
   messages,
@@ -72,6 +78,7 @@ export function EmailThread({
   >(() => new Map());
   const [recoveredReply, setRecoveredReply] = useState<{
     messageId: string;
+    mode: ReplyDraftMode;
     version: number;
   }>();
   useEffect(() => {
@@ -83,7 +90,7 @@ export function EmailThread({
   const expanded = (id: string, hasDraft: boolean) =>
     expansionOverrides.get(id) ?? (id === lastMessageId || hasDraft);
   const hasLocalDraft = (id: string) =>
-    localDrafts.some((draft) => draft.messageId === id);
+    Boolean(getLocalDraftMode(localDrafts, id));
   const allExpanded = organizedMessages.every(({ message, draftMessage }) =>
     expanded(
       message.id,
@@ -198,11 +205,15 @@ export function EmailThread({
 
       <ul className="pt-1">
         {organizedMessages.map(({ message, draftMessage }) => {
-          const defaultShowReply =
-            autoOpenReplyForMessageId === message.id ||
-            recoveredReply?.messageId === message.id ||
-            Boolean(draftMessage) ||
-            hasLocalDraft(message.id);
+          const defaultComposeMode = getDefaultComposeMode({
+            autoOpen: autoOpenReplyForMessageId === message.id,
+            draftMessage: Boolean(draftMessage),
+            localDraftMode: getLocalDraftMode(localDrafts, message.id),
+            recoveredReply:
+              recoveredReply?.messageId === message.id
+                ? recoveredReply
+                : undefined,
+          });
           return (
             <EmailMessage
               onNavigateMessage={
@@ -218,9 +229,9 @@ export function EmailThread({
                   ? () => setSelectedMessageId(message.id)
                   : undefined
               }
-              defaultShowReply={defaultShowReply}
+              defaultComposeMode={defaultComposeMode}
               draftMessage={draftMessage}
-              expanded={expanded(message.id, defaultShowReply)}
+              expanded={expanded(message.id, Boolean(defaultComposeMode))}
               hasDraft={Boolean(draftMessage) || hasLocalDraft(message.id)}
               key={`${message.id}:${recoveredReply?.messageId === message.id ? recoveredReply.version : 0}`}
               message={message}
@@ -240,7 +251,7 @@ export function EmailThread({
                       setExpansionOverrides((prev) =>
                         new Map(prev).set(
                           message.id,
-                          !expanded(message.id, defaultShowReply),
+                          !expanded(message.id, Boolean(defaultComposeMode)),
                         ),
                       );
                     }
@@ -258,12 +269,13 @@ export function EmailThread({
           threadId={threadId}
           messageIds={messages.map((message) => message.id)}
           refetch={refetch}
-          onEditReply={(messageId) => {
+          onEditReply={(messageId, mode) => {
             setExpansionOverrides((previous) =>
               new Map(previous).set(messageId, true),
             );
             setRecoveredReply((previous) => ({
               messageId,
+              mode,
               version: (previous?.version ?? 0) + 1,
             }));
           }}
@@ -271,4 +283,35 @@ export function EmailThread({
       )}
     </div>
   );
+}
+
+function getLocalDraftMode(drafts: StoredReplyDraft[], messageId: string) {
+  const latest = drafts
+    .filter(
+      (draft) =>
+        draft.messageId === messageId ||
+        draft.messageId === getReplyDraftSessionId(messageId, "reply") ||
+        draft.messageId === getReplyDraftSessionId(messageId, "forward"),
+    )
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  if (!latest) return;
+  return latest.messageId === getReplyDraftSessionId(messageId, "forward")
+    ? ("forward" as const)
+    : getReplyDraftMode(latest);
+}
+
+function getDefaultComposeMode({
+  autoOpen,
+  draftMessage,
+  localDraftMode,
+  recoveredReply,
+}: {
+  autoOpen: boolean;
+  draftMessage: boolean;
+  localDraftMode?: ReplyDraftMode;
+  recoveredReply?: { mode: ReplyDraftMode };
+}) {
+  if (recoveredReply) return recoveredReply.mode;
+  if (autoOpen || draftMessage) return "reply" as const;
+  return localDraftMode;
 }
