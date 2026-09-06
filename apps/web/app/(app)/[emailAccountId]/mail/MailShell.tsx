@@ -165,7 +165,6 @@ export function MailShell() {
   const [searchParam, setSearchParam] = useQueryState("q");
 
   const [focusedIndex, setFocusedIndex] = useState(0);
-  const [isFocusMode, setIsFocusMode] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [replyToMessageId, setReplyToMessageId] = useState<string>();
@@ -682,7 +681,6 @@ export function MailShell() {
     isHelpOpen || isPaletteOpen || (isMenuOpen && Boolean(openThreadId));
 
   const closeReader = () => {
-    setIsFocusMode(false);
     setOpenThread(null);
   };
 
@@ -691,14 +689,19 @@ export function MailShell() {
   const handlers: ShortcutHandlers = (() => {
     if (sidePanelThreadId) return {};
     return {
-      next: () => move(1),
-      previous: () => move(-1),
+      next: (event) => {
+        if (openThreadId && event?.key === "ArrowDown") return;
+        move(1);
+      },
+      previous: (event) => {
+        if (openThreadId && event?.key === "ArrowUp") return;
+        move(-1);
+      },
       open: openThreadId ? requestReaderReply : () => openAt(clampedIndex),
       backToList: isMailOverlayOpen
         ? undefined
         : () => {
-            if (isFocusMode) setIsFocusMode(false);
-            else if (selection.hasSelection) selection.clear();
+            if (selection.hasSelection) selection.clear();
             else if (layout === "list") closeReader();
           },
       nextSplit: () => {
@@ -727,7 +730,6 @@ export function MailShell() {
         : undefined,
       undo: () => undo(),
       toggleLayout: isAllAccounts ? undefined : toggleLayout,
-      focusMode: openThreadId ? () => setIsFocusMode((on) => !on) : undefined,
       help: () => setIsHelpOpen(true),
     };
   })();
@@ -963,7 +965,7 @@ export function MailShell() {
     [openThreadSelection, refetchOpenThread],
   );
 
-  const showList = !isFocusMode && (layout === "split" || !openThreadSelection);
+  const showList = layout === "split" || !openThreadSelection;
   const showReader = layout === "split" || Boolean(openThreadSelection);
   const readerEmailAccount = openThreadSelection
     ? openThreadSelection.emailAccountId === emailAccountId
@@ -1008,7 +1010,7 @@ export function MailShell() {
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex min-h-0 flex-1">
         <div className="hidden [--sidebar-width:236px] lg:contents">
-          <Sidebar name="left-sidebar" forceCollapsed={isFocusMode}>
+          <Sidebar name="left-sidebar">
             <MailSidebar
               className="h-full w-full border-r-0"
               activeType={
@@ -1124,6 +1126,7 @@ export function MailShell() {
         {showReader && (!openThreadSelection || readerEmailAccount) ? (
           <EmailAccountScopeProvider emailAccount={readerEmailAccount}>
             <ThreadReader
+              enableMessageNavigation={!sidePanelThreadId}
               key={openReaderThreadKey ?? "empty"}
               thread={openThread ?? null}
               threadId={openThreadId}
@@ -1136,14 +1139,10 @@ export function MailShell() {
               messages={openMessages}
               userLabels={readerUserLabels}
               layout={layout}
-              isFocusMode={isFocusMode}
               labelHref={labelHref}
               onRemoveLabel={onRemoveLabel}
               onBackToInbox={closeReader}
               onArchive={archiveTargets}
-              onDelete={trashTargets}
-              onReply={requestReaderReply}
-              onToggleFocusMode={() => setIsFocusMode((on) => !on)}
               showSidebarToggle={!isMailSidebarOpen}
               refetch={refetchOpenThread}
               autoOpenReplyForMessageId={replyToMessageId}
@@ -1154,6 +1153,7 @@ export function MailShell() {
                   setChatInput={setChatInput}
                   isUnread={isOpenThreadUnread}
                   onMarkSpam={markSpamTargets}
+                  onDelete={trashTargets}
                   onToggleRead={() => {
                     if (!openThreadKey) return;
                     setReadState([openThreadKey], isOpenThreadUnread);
@@ -1172,11 +1172,11 @@ export function MailShell() {
 
         {showReader && openThreadSelection && !readerEmailAccount ? (
           <div
-            aria-label="Loading account"
+            aria-label="Loading"
             className="flex min-h-0 min-w-0 flex-1 items-center justify-center text-muted-foreground text-sm"
             role="status"
           >
-            Loading account…
+            Loading…
           </div>
         ) : null}
       </div>

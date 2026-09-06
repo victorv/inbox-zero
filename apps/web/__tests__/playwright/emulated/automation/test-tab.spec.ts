@@ -9,9 +9,8 @@ for (const custom of [false, true]) {
   }) => {
     const emailAccountId = await getEmailAccountId(page);
     await markAutomationOnboardingViewed(page);
-    await page.goto(`/${emailAccountId}/automation?tab=test`);
+    await page.goto(`/${emailAccountId}/automation?tab=test&custom=${custom}`);
     if (custom) {
-      await page.getByRole("button", { name: "Custom" }).click();
       await page
         .locator("textarea[name=content]")
         .fill("A routine project update.");
