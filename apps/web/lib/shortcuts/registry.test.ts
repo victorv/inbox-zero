@@ -76,6 +76,7 @@ describe("shortcut registry", () => {
     expect(formatShortcutKeys(getShortcut("toggleLayout"))).toBe("⇧V");
     expect(formatShortcutKeys(getShortcut("markSpam"))).toBe("!");
     expect(formatShortcutKeys(getShortcut("openExternal"))).toBe("G G");
+    expect(formatShortcutKeys(getShortcut("forward"))).toBe("F");
   });
 
   it("splits keys into one spelled-out label per block", () => {
@@ -238,6 +239,22 @@ describe("buildShortcutPaletteCommands", () => {
     const commands = buildShortcutPaletteCommands({ reply: vi.fn() });
 
     expect(commands.map((command) => command.id)).not.toContain("reply");
+  });
+
+  it("surfaces forwarding in the palette when a message can be forwarded", () => {
+    const forward = vi.fn();
+    const commands = buildShortcutPaletteCommands({ forward });
+
+    expect(commands).toHaveLength(1);
+    expect(commands.at(0)).toMatchObject({
+      id: "forward",
+      label: "Forward",
+      section: "actions",
+      shortcut: "F",
+    });
+
+    commands.at(0)?.action();
+    expect(forward).toHaveBeenCalledOnce();
   });
 });
 

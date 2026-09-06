@@ -178,7 +178,11 @@ export function MailShell() {
     targets: ThreadSelection[];
   } | null>(null);
   const [replyToMessageId, setReplyToMessageId] = useState<string>();
-  const pendingReplyThreadKey = useRef<string | null>(null);
+  const [forwardToMessageId, setForwardToMessageId] = useState<string>();
+  const pendingComposeRequest = useRef<{
+    mode: "reply" | "forward";
+    threadKey: string;
+  } | null>(null);
   const isMailSidebarOpen = openSidebars.includes("left-sidebar");
 
   useEffect(() => {
@@ -492,27 +496,56 @@ export function MailShell() {
   const requestReaderReply = useCallback(() => {
     const messageId = openMessages.at(-1)?.id;
     if (messageId) {
-      pendingReplyThreadKey.current = null;
+      pendingComposeRequest.current = null;
+      setForwardToMessageId(undefined);
       setReplyToMessageId(messageId);
       return;
     }
 
-    pendingReplyThreadKey.current = openReaderThreadKey;
+    if (openReaderThreadKey) {
+      pendingComposeRequest.current = {
+        mode: "reply",
+        threadKey: openReaderThreadKey,
+      };
+    }
+  }, [openMessages, openReaderThreadKey]);
+
+  const requestReaderForward = useCallback(() => {
+    const messageId = openMessages.at(-1)?.id;
+    if (messageId) {
+      pendingComposeRequest.current = null;
+      setReplyToMessageId(undefined);
+      setForwardToMessageId(messageId);
+      return;
+    }
+
+    if (openReaderThreadKey) {
+      pendingComposeRequest.current = {
+        mode: "forward",
+        threadKey: openReaderThreadKey,
+      };
+    }
   }, [openMessages, openReaderThreadKey]);
 
   useEffect(() => {
-    const pendingThreadKey = pendingReplyThreadKey.current;
-    if (!pendingThreadKey) return;
-    if (pendingThreadKey !== openReaderThreadKey) {
-      pendingReplyThreadKey.current = null;
+    const pendingRequest = pendingComposeRequest.current;
+    if (!pendingRequest) return;
+    if (pendingRequest.threadKey !== openReaderThreadKey) {
+      pendingComposeRequest.current = null;
       return;
     }
 
     const messageId = openMessages.at(-1)?.id;
     if (!readerSelectionSettled || !messageId) return;
 
-    pendingReplyThreadKey.current = null;
-    setReplyToMessageId(messageId);
+    pendingComposeRequest.current = null;
+    if (pendingRequest.mode === "reply") {
+      setForwardToMessageId(undefined);
+      setReplyToMessageId(messageId);
+    } else {
+      setReplyToMessageId(undefined);
+      setForwardToMessageId(messageId);
+    }
   }, [openMessages, openReaderThreadKey, readerSelectionSettled]);
 
   // Let the fetched snapshot decide the initial read state. Once marking has
@@ -604,6 +637,7 @@ export function MailShell() {
       if (!thread) return;
       setFocusedIndex(index);
       setReplyToMessageId(undefined);
+      setForwardToMessageId(undefined);
       selection.clear();
       setOpenThread(getListThreadSelection(thread, emailAccountId));
     },
@@ -620,6 +654,7 @@ export function MailShell() {
       const nextThread = threads[next];
       if ((layout === "split" || openThreadId) && nextThread) {
         setReplyToMessageId(undefined);
+        setForwardToMessageId(undefined);
         setOpenThread(getListThreadSelection(nextThread, emailAccountId));
       }
     },
@@ -695,7 +730,10 @@ export function MailShell() {
     (until: Date) => runOn((ids) => snooze(ids, until), true),
     [runOn, snooze],
   );
-  const currentLabelTargets = actionTargets.map((target) => target.selection);
+  const currentLabelTargets = useMemo(
+    () => actionTargets.map((target) => target.selection),
+    [actionTargets],
+  );
   const labelAccountId = currentLabelTargets[0]?.emailAccountId;
   const labelAccount =
     labelAccountId === emailAccountId
@@ -709,27 +747,56 @@ export function MailShell() {
     currentLabelTargets.every(
       (target) => target.emailAccountId === labelAccountId,
     );
-  const openLabelPicker = () => {
+  const openLabelPicker = useCallback(() => {
     if (canLabel)
       setLabelPicker({ mode: "label", targets: currentLabelTargets });
-  };
-  const openMovePicker = () => {
+  }, [canLabel, currentLabelTargets]);
+  const openMovePicker = useCallback(() => {
     if (canLabel)
       setLabelPicker({ mode: "move", targets: currentLabelTargets });
-  };
+  }, [canLabel, currentLabelTargets]);
+  const singleActionTarget =
+    actionTargets.length === 1 ? actionTargets.at(0) : undefined;
+  const requestForwardTarget = useCallback(() => {
+    if (!singleActionTarget) return;
+    if (singleActionTarget.key === openThreadKey) {
+      requestReaderForward();
+      return;
+    }
+
+    pendingComposeRequest.current = {
+      mode: "forward",
+      threadKey: singleActionTarget.key,
+    };
+    setReplyToMessageId(undefined);
+    setForwardToMessageId(undefined);
+    setOpenThread(singleActionTarget.selection);
+  }, [openThreadKey, requestReaderForward, setOpenThread, singleActionTarget]);
   const pickerAccount =
     labelPicker?.targets[0]?.emailAccountId === emailAccountId
       ? emailAccount
       : accountsData?.emailAccounts.find(
           (account) => account.id === labelPicker?.targets[0]?.emailAccountId,
         );
+  const isReaderTarget =
+    singleActionTarget !== undefined &&
+    singleActionTarget.key === openThreadKey;
 
   const mailCommandContext = useMemo(
     () => ({
       actions: {
         archive: archiveTargets,
+        forward: singleActionTarget ? requestForwardTarget : undefined,
+        label: canLabel ? openLabelPicker : undefined,
         markRead: markReadTargets,
+        markSpam: markSpamTargets,
         markUnread: markUnreadTargets,
+        move: canLabel ? openMovePicker : undefined,
+        openExternal:
+          isReaderTarget && openExternalUrl
+            ? () =>
+                window.open(openExternalUrl, "_blank", "noopener,noreferrer")
+            : undefined,
         snooze: snoozeTargets,
         trash: trashTargets,
       },
@@ -737,13 +804,32 @@ export function MailShell() {
       hasUnread: actionTargets.some((target) =>
         isThreadUnread(target.messages),
       ),
+      openExternalLabel:
+        isReaderTarget && openExternalUrl
+          ? `Open in ${isMicrosoftProvider(readerEmailAccount?.account.provider) ? "Outlook" : "Gmail"}`
+          : undefined,
+      target: singleActionTarget
+        ? {
+            emailAccountId: singleActionTarget.selection.emailAccountId,
+            threadId: singleActionTarget.selection.threadId,
+          }
+        : undefined,
       targetCount: actionTargets.length,
     }),
     [
       archiveTargets,
       actionTargets,
+      canLabel,
+      isReaderTarget,
       markReadTargets,
+      markSpamTargets,
       markUnreadTargets,
+      openLabelPicker,
+      openMovePicker,
+      openExternalUrl,
+      readerEmailAccount?.account.provider,
+      requestForwardTarget,
+      singleActionTarget,
       snoozeTargets,
       trashTargets,
     ],
@@ -861,17 +947,20 @@ export function MailShell() {
       markUnread: markUnreadTargets,
       delete: trashTargets,
       reply: () => {
+        setForwardToMessageId(undefined);
         if (!openThreadId && focusedThread) {
           setOpenThread(getListThreadSelection(focusedThread, emailAccountId));
         }
         setReplyToMessageId(openMessages.at(-1)?.id);
       },
+      forward: singleActionTarget ? requestForwardTarget : undefined,
       moreActions: openThreadId
         ? () => setIsMenuOpen((open) => !open)
         : undefined,
-      openExternal: openExternalUrl
-        ? () => window.open(openExternalUrl, "_blank", "noopener,noreferrer")
-        : undefined,
+      openExternal:
+        isReaderTarget && openExternalUrl
+          ? () => window.open(openExternalUrl, "_blank", "noopener,noreferrer")
+          : undefined,
       undo: () => undo(),
       toggleLayout: isAllAccounts ? undefined : toggleLayout,
       help: () => setIsHelpOpen(true),
@@ -1271,6 +1360,7 @@ export function MailShell() {
                 });
               }}
               autoOpenReplyForMessageId={replyToMessageId}
+              autoOpenForwardForMessageId={forwardToMessageId}
               menu={
                 <ThreadActionsMenu
                   plans={openThread?.plans ?? []}

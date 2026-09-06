@@ -1,6 +1,7 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import { useEffect, useMemo, type ComponentProps } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -40,6 +41,10 @@ import { useAccount } from "@/providers/EmailAccountProvider";
 import { ACTION_TYPE_LABELS, getVisibleActions } from "@/utils/action-display";
 import { isMicrosoftProvider } from "@/utils/email/provider-types";
 import type { ParsedMessage } from "@/utils/types";
+import {
+  commandPaletteOpenAtom,
+  senderCommandContextAtom,
+} from "@/store/command-palette";
 
 type FixWithChatResults = ComponentProps<typeof FixWithChat>["results"];
 
@@ -90,7 +95,9 @@ export function ThreadActionsMenu({
   onOpenChange,
 }: ThreadActionsMenuProps) {
   const hint = getShortcutHint("moreActions");
-  const { provider, userEmail } = useAccount();
+  const isCommandPaletteOpen = useAtomValue(commandPaletteOpenAtom);
+  const setSenderCommandContext = useSetAtom(senderCommandContextAtom);
+  const { emailAccountId, provider, userEmail } = useAccount();
   const {
     canManageAutoArchive,
     canUnsubscribe,
@@ -100,7 +107,9 @@ export function ThreadActionsMenu({
     onToggleAutoArchive,
     onUnsubscribe,
     PremiumModal,
-  } = useUnsubscribeSender(message, { loadStoredLink: Boolean(open) });
+  } = useUnsubscribeSender(message, {
+    loadStoredLink: Boolean(open || isCommandPaletteOpen),
+  });
   const openUrl = message
     ? getEmailMessageCellActions({
         externalUrl: message.externalUrl,
@@ -110,6 +119,41 @@ export function ThreadActionsMenu({
         userEmail,
       })?.openUrl
     : undefined;
+  const senderCommandContext = useMemo(
+    () =>
+      canManageAutoArchive
+        ? {
+            emailAccountId,
+            isAutoArchived,
+            isAutoArchiveDisabled:
+              isAutoArchiveStatusLoading || isUpdatingAutoArchive,
+            isUnsubscribeDisabled: !canUnsubscribe,
+            threadId: message?.threadId ?? "",
+            toggleAutoArchive: onToggleAutoArchive,
+            unsubscribe: onUnsubscribe,
+          }
+        : null,
+    [
+      canManageAutoArchive,
+      canUnsubscribe,
+      emailAccountId,
+      isAutoArchived,
+      isAutoArchiveStatusLoading,
+      isUpdatingAutoArchive,
+      onToggleAutoArchive,
+      onUnsubscribe,
+      message?.threadId,
+    ],
+  );
+
+  useEffect(() => {
+    setSenderCommandContext(senderCommandContext);
+  }, [senderCommandContext, setSenderCommandContext]);
+
+  useEffect(
+    () => () => setSenderCommandContext(null),
+    [setSenderCommandContext],
+  );
 
   return (
     <>

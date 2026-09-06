@@ -38,6 +38,7 @@ export function HtmlEmail({
   emailAccountId,
   inlineAttachments = NO_INLINE_ATTACHMENTS,
   onReplyMessage,
+  onForwardMessage,
   onNavigateMessage,
   onFocusMessage,
 }: {
@@ -46,6 +47,7 @@ export function HtmlEmail({
   emailAccountId?: string;
   inlineAttachments?: ParsedMessage["inline"];
   onReplyMessage?: () => void;
+  onForwardMessage?: () => void;
   onNavigateMessage?: (direction: -1 | 1) => void;
   onFocusMessage?: () => void;
 }) {
@@ -125,6 +127,7 @@ export function HtmlEmail({
   );
 
   const iframeHeight = useEmailIframe(iframeRef, srcDoc, documentKey, {
+    onForwardMessage,
     onNavigateMessage,
     onReplyMessage,
     onFocusMessage,
@@ -441,6 +444,7 @@ function useEmailIframe(
   srcDoc: string,
   documentKey: string,
   callbacks: {
+    onForwardMessage?: () => void;
     onReplyMessage?: () => void;
     onNavigateMessage?: (direction: -1 | 1) => void;
     onFocusMessage?: () => void;
@@ -464,9 +468,15 @@ function useEmailIframe(
     const navigateMessage = (event: KeyboardEvent) => {
       const navigate = callbacksRef.current.onNavigateMessage;
       const reply = callbacksRef.current.onReplyMessage;
+      const forward = callbacksRef.current.onForwardMessage;
+      const key = event.key.toLowerCase();
+      const isNavigationKey = ["ArrowUp", "ArrowDown"].includes(event.key);
+      const handlesKey =
+        (event.key === "Enter" && Boolean(reply)) ||
+        (key === "f" && Boolean(forward)) ||
+        (isNavigationKey && Boolean(navigate));
       if (
-        !(event.key === "Enter" ? reply : navigate) ||
-        !["Enter", "ArrowUp", "ArrowDown"].includes(event.key) ||
+        !handlesKey ||
         event.altKey ||
         event.ctrlKey ||
         event.metaKey ||
@@ -485,6 +495,7 @@ function useEmailIframe(
       if (event.key === "Enter" && target?.closest?.("a, button")) return;
       event.preventDefault();
       if (event.key === "Enter") reply?.();
+      else if (key === "f") forward?.();
       else navigate?.(event.key === "ArrowUp" ? -1 : 1);
     };
     const stopObservingDocument = () => {

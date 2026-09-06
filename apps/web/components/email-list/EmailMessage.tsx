@@ -172,6 +172,7 @@ export function EmailMessage({
 
           {message.textHtml ? (
             <HtmlEmail
+              onForwardMessage={showReplyButton ? onForward : undefined}
               onReplyMessage={showReplyButton ? onReply : undefined}
               onNavigateMessage={onNavigateMessage}
               onFocusMessage={onSelect}
