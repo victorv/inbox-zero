@@ -104,6 +104,8 @@ import {
 } from "@/utils/mail/split-query";
 import { getActionErrorMessage } from "@/utils/error";
 import { prefixPath } from "@/utils/path";
+import { redirectToSafeUrl } from "@/utils/redirect";
+import { getInboxZeroDesktopApp } from "@/utils/desktop-app";
 import { LoadingContent } from "@/components/LoadingContent";
 import { getEmailMessageCellActions } from "@/components/EmailMessageCellActions";
 import type { LabelCount } from "@/app/api/labels/counts/route";
@@ -168,6 +170,7 @@ export function MailShell() {
   const [searchParam, setSearchParam] = useQueryState("q");
 
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const [isDesktopApp, setIsDesktopApp] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [labelPicker, setLabelPicker] = useState<{
@@ -177,6 +180,10 @@ export function MailShell() {
   const [replyToMessageId, setReplyToMessageId] = useState<string>();
   const pendingReplyThreadKey = useRef<string | null>(null);
   const isMailSidebarOpen = openSidebars.includes("left-sidebar");
+
+  useEffect(() => {
+    setIsDesktopApp(Boolean(getInboxZeroDesktopApp()));
+  }, []);
 
   const isAllAccounts = accountScope === "all";
   const setOpenThread = useCallback(
@@ -754,6 +761,48 @@ export function MailShell() {
     Boolean(labelPicker) ||
     (isMenuOpen && Boolean(openThreadId));
 
+  const selectAccount = useCallback((accountId: string) => {
+    const params = new URLSearchParams(window.location.search);
+    const hasAccountScopedFilter =
+      params.has("labelId") || params.has("folderId");
+    params.delete("accountScope");
+    params.delete("thread-id");
+    params.delete("thread-account-id");
+    params.delete("labelId");
+    params.delete("folderId");
+    if (hasAccountScopedFilter) params.delete("type");
+    const query = params.toString();
+    redirectToSafeUrl(`/${accountId}/mail${query ? `?${query}` : ""}`);
+  }, []);
+
+  const selectAllAccounts = useCallback(() => {
+    selection.clear();
+    setFocusedIndex(0);
+    setOpenThread(null);
+    setScopeType(null);
+    setScopeLabelId(null);
+    setScopeFolderId(null);
+    setSearchParam(null);
+    if (
+      !BUILT_IN_SPLITS.some((split) => split.id === activeSplitId) &&
+      !combinedLabelSplits.some((split) => split.id === activeSplitId)
+    ) {
+      setActiveSplitId("all");
+    }
+    setAccountScope("all");
+  }, [
+    activeSplitId,
+    combinedLabelSplits,
+    selection.clear,
+    setAccountScope,
+    setActiveSplitId,
+    setOpenThread,
+    setScopeFolderId,
+    setScopeLabelId,
+    setScopeType,
+    setSearchParam,
+  ]);
+
   const closeReader = () => {
     setOpenThread(null);
   };
@@ -785,6 +834,20 @@ export function MailShell() {
         const next = splits[(index + 1) % splits.length];
         if (next) setActiveSplitId(next.id);
       },
+      switchAccount: (event) => {
+        const accountNumber = Number(event?.key);
+        if (
+          !Number.isInteger(accountNumber) ||
+          accountNumber < 1 ||
+          accountNumber > 9
+        )
+          return;
+        const account = accountsData?.emailAccounts.at(accountNumber - 1);
+        if (account && (isAllAccounts || account.id !== emailAccountId)) {
+          selectAccount(account.id);
+        }
+      },
+      switchAllAccounts: selectAllAccounts,
       select: () => selection.toggle(clampedIndex),
       selectAll: selection.selectAll,
       // The cursor travels with the extension; without that, every repeat
@@ -815,7 +878,7 @@ export function MailShell() {
     };
   })();
 
-  useShortcuts(handlers);
+  useShortcuts(handlers, { isDesktopApp });
 
   const categoryGroup: NewSplitOption["group"] = isOutlook
     ? "inbox"
@@ -1052,34 +1115,6 @@ export function MailShell() {
     ? (labelsByAccount[openThreadSelection?.emailAccountId ?? ""] ?? NO_LABELS)
     : userLabels;
 
-  const selectAllAccounts = useCallback(() => {
-    selection.clear();
-    setFocusedIndex(0);
-    setOpenThread(null);
-    setScopeType(null);
-    setScopeLabelId(null);
-    setScopeFolderId(null);
-    setSearchParam(null);
-    if (
-      !BUILT_IN_SPLITS.some((split) => split.id === activeSplitId) &&
-      !combinedLabelSplits.some((split) => split.id === activeSplitId)
-    ) {
-      setActiveSplitId("all");
-    }
-    setAccountScope("all");
-  }, [
-    activeSplitId,
-    combinedLabelSplits,
-    selection.clear,
-    setAccountScope,
-    setActiveSplitId,
-    setOpenThread,
-    setScopeFolderId,
-    setScopeLabelId,
-    setScopeType,
-    setSearchParam,
-  ]);
-
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex min-h-0 flex-1">
@@ -1115,6 +1150,7 @@ export function MailShell() {
               footer={
                 <MailAccountSwitcher
                   isAllAccounts={isAllAccounts}
+                  onSelectAccount={selectAccount}
                   onSelectAll={selectAllAccounts}
                   variant="sidebar"
                 />
@@ -1262,6 +1298,7 @@ export function MailShell() {
 
       <MailAccountSwitcher
         isAllAccounts={isAllAccounts}
+        onSelectAccount={selectAccount}
         onSelectAll={selectAllAccounts}
         variant="compact"
       />
@@ -1314,7 +1351,11 @@ export function MailShell() {
           />
         </EmailAccountScopeProvider>
       )}
-      <ShortcutsDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
+      <ShortcutsDialog
+        isDesktopApp={isDesktopApp}
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

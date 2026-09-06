@@ -60,6 +60,8 @@ export type ShortcutEntry = {
   display?: readonly string[];
   /** Fires even while typing. Only for modifier combos and Escape. */
   allowWhileTyping?: boolean;
+  /** Only available in the Electron shell, never in a browser tab. */
+  desktopOnly?: boolean;
   /** Handles the key before rich text editors can consume it. */
   capture?: boolean;
   /** Present means the entry shows in ⌘K once a handler is registered. */
@@ -104,6 +106,36 @@ const SHORTCUT_DEFINITIONS = [
     scope: "mail",
     group: "Navigate",
     label: "Next split",
+  },
+  {
+    id: "switchAccount",
+    keys: [
+      "mod+1",
+      "mod+2",
+      "mod+3",
+      "mod+4",
+      "mod+5",
+      "mod+6",
+      "mod+7",
+      "mod+8",
+      "mod+9",
+    ],
+    display: ["modorctrl+1–9"],
+    scope: "mail",
+    group: "Navigate",
+    label: "Switch account",
+    allowWhileTyping: true,
+    desktopOnly: true,
+  },
+  {
+    id: "switchAllAccounts",
+    keys: ["mod+0"],
+    display: ["modorctrl+0"],
+    scope: "mail",
+    group: "Navigate",
+    label: "All accounts",
+    allowWhileTyping: true,
+    desktopOnly: true,
   },
   {
     id: "backToApp",
@@ -354,15 +386,20 @@ export function getShortcut(id: ShortcutId): ShortcutEntry {
 
 export function getShortcutsForScopes(
   scopes: readonly ShortcutScope[],
+  { isDesktopApp = false }: { isDesktopApp?: boolean } = {},
 ): ShortcutEntry[] {
-  return SHORTCUTS.filter((entry) => scopes.includes(entry.scope));
+  return SHORTCUTS.filter(
+    (entry) =>
+      scopes.includes(entry.scope) && (!entry.desktopOnly || isDesktopApp),
+  );
 }
 
 /** Feeds the `?` help dialog so it can never drift from the handlers. */
 export function getShortcutGroups(
   scopes: readonly ShortcutScope[],
+  options: { isDesktopApp?: boolean } = {},
 ): { group: ShortcutGroup; shortcuts: ShortcutEntry[] }[] {
-  const entries = getShortcutsForScopes(scopes);
+  const entries = getShortcutsForScopes(scopes, options);
 
   return SHORTCUT_GROUPS.map((group) => ({
     group,
@@ -524,6 +561,7 @@ if (process.env.NODE_ENV === "production") {
 
 const KEY_SYMBOLS: Record<string, string> = {
   mod: "⌘",
+  modorctrl: "⌘/Ctrl+",
   meta: "⌘",
   ctrl: "⌃",
   alt: "⌥",
