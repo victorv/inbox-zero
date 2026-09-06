@@ -33,6 +33,7 @@ import { GmailLabel } from "@/utils/gmail/label";
 import { cn } from "@/utils";
 import type { OutlookFolder } from "@/utils/outlook/folders";
 import { OUTLOOK_INBOX_SECTIONS } from "@/utils/mail/outlook-inbox";
+import { getLabelTree, type SidebarLabel } from "./label-tree";
 import { getMailSidebarFolders } from "./outlook-folder-list";
 import {
   MailboxItemContextMenu,
@@ -169,6 +170,8 @@ export function MailSidebar({
   const [isAddingLabel, setIsAddingLabel] = useState(false);
   const [newLabelName, setNewLabelName] = useState("");
   const sidebarFolders = getMailSidebarFolders(folders);
+  const labelTree = getLabelTree(labels, labelEditMode === "name-and-color");
+  const hasNestedLabels = labelTree.some((root) => root.children.length > 0);
 
   const isCategoryActive =
     !activeLabelId &&
@@ -333,34 +336,20 @@ export function MailSidebar({
               {labelsHeading}
             </GroupHeading>
             <nav className="flex flex-col gap-px">
-              {labels.map((label) => (
-                <MailboxItemContextMenu
-                  key={label.id}
-                  item={{ kind: "label", id: label.id, name: label.name }}
-                  typeName={labelSingular}
-                  editMode={labelEditMode}
-                  currentColor={label.color}
-                  colorOptions={labelColorOptions}
-                  onEdit={onEditMailboxItem}
-                  onDelete={onDeleteMailboxItem}
-                >
-                  <NavRow
-                    href={hrefFor({ kind: "label", labelId: label.id })}
-                    active={activeLabelId === label.id}
-                    icon={
-                      <span
-                        className="size-2.5 shrink-0 rounded-full bg-muted-foreground/40"
-                        style={
-                          label.color?.backgroundColor
-                            ? { backgroundColor: label.color.backgroundColor }
-                            : undefined
-                        }
-                      />
-                    }
-                    name={label.name}
-                    count={displayCount(countsById.get(label.id))}
-                  />
-                </MailboxItemContextMenu>
+              {labelTree.map((node) => (
+                <LabelBranch
+                  key={node.label.id}
+                  node={node}
+                  hasNestedLabels={hasNestedLabels}
+                  activeLabelId={activeLabelId}
+                  hrefFor={hrefFor}
+                  countsById={countsById}
+                  labelSingular={labelSingular}
+                  labelEditMode={labelEditMode}
+                  labelColorOptions={labelColorOptions}
+                  onEditMailboxItem={onEditMailboxItem}
+                  onDeleteMailboxItem={onDeleteMailboxItem}
+                />
               ))}
             </nav>
 
@@ -405,6 +394,104 @@ export function MailSidebar({
       </button>
       {footer}
     </aside>
+  );
+}
+
+function LabelBranch({
+  node,
+  hasNestedLabels,
+  ...props
+}: Pick<
+  MailSidebarProps,
+  | "activeLabelId"
+  | "hrefFor"
+  | "countsById"
+  | "labelSingular"
+  | "labelEditMode"
+  | "labelColorOptions"
+  | "onEditMailboxItem"
+  | "onDeleteMailboxItem"
+> & { node: SidebarLabel; hasNestedLabels: boolean }) {
+  const { label, children } = node;
+  const activeDescendantId = children.some((child) =>
+    containsLabel(child, props.activeLabelId),
+  )
+    ? props.activeLabelId
+    : null;
+  const [expansion, setExpansion] = useState({
+    activeDescendantId,
+    expanded: true,
+  });
+  // Reveal each newly selected descendant while retaining unrelated collapse choices.
+  if (expansion.activeDescendantId !== activeDescendantId) {
+    setExpansion({
+      activeDescendantId,
+      expanded: activeDescendantId !== null || expansion.expanded,
+    });
+  }
+  const { expanded } = expansion;
+
+  return (
+    <div>
+      <MailboxItemContextMenu
+        item={{ kind: "label", id: label.id, name: label.name }}
+        typeName={props.labelSingular}
+        editMode={props.labelEditMode}
+        currentColor={label.color}
+        colorOptions={props.labelColorOptions}
+        onEdit={props.onEditMailboxItem}
+        onDelete={props.onDeleteMailboxItem}
+      >
+        <div className="relative">
+          {children.length > 0 && (
+            <button
+              type="button"
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${label.name}`}
+              aria-expanded={expanded}
+              onClick={() =>
+                setExpansion({ activeDescendantId, expanded: !expanded })
+              }
+              className="absolute top-1/2 left-0 z-10 flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {expanded ? (
+                <ChevronDownIcon className="size-3" />
+              ) : (
+                <ChevronRightIcon className="size-3" />
+              )}
+            </button>
+          )}
+          <NavRow
+            href={props.hrefFor({ kind: "label", labelId: label.id })}
+            active={props.activeLabelId === label.id}
+            icon={
+              <span
+                className="size-2.5 shrink-0 rounded-full bg-muted-foreground/40"
+                style={
+                  label.color?.backgroundColor
+                    ? { backgroundColor: label.color.backgroundColor }
+                    : undefined
+                }
+              />
+            }
+            name={node.name}
+            count={displayCount(props.countsById.get(label.id))}
+            nested={hasNestedLabels}
+          />
+        </div>
+      </MailboxItemContextMenu>
+      {expanded && children.length > 0 && (
+        <div className="ml-3">
+          {children.map((child) => (
+            <LabelBranch
+              key={child.label.id}
+              node={child}
+              hasNestedLabels={hasNestedLabels}
+              {...props}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -457,6 +544,7 @@ function NavRow({
   name,
   count,
   emphasizeCount,
+  nested,
 }: {
   href?: string;
   active: boolean;
@@ -464,9 +552,11 @@ function NavRow({
   name: string;
   count: number | null;
   emphasizeCount?: boolean;
+  nested?: boolean;
 }) {
   const className = cn(
     "flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    nested && "pl-7",
     active
       ? "bg-primary/10 font-medium text-foreground"
       : "text-muted-foreground hover:bg-accent hover:text-foreground",
@@ -517,4 +607,11 @@ function displayCount(count: LabelCount | undefined): number | null {
   if (!count) return null;
   const value = count.id === "DRAFT" ? count.total : count.unread;
   return value > 0 ? value : null;
+}
+
+function containsLabel(node: SidebarLabel, labelId: string | null): boolean {
+  return (
+    node.label.id === labelId ||
+    node.children.some((child) => containsLabel(child, labelId))
+  );
 }
