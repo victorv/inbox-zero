@@ -61,6 +61,9 @@ test("captures the rich message reader states", async ({ page }, testInfo) => {
   });
   await expect(autoArchive).toBeVisible();
   await expect(autoArchive).toHaveAttribute("aria-disabled", "true");
+  await actionsMenu.evaluate((menu) =>
+    Promise.all(menu.getAnimations().map((animation) => animation.finished)),
+  );
   const openInGmailBeforeLoad = await openInGmail.boundingBox();
   expect(openInGmailBeforeLoad).not.toBeNull();
   releaseSenderStats.resolve();
@@ -247,6 +250,7 @@ test("opens the sender profile beside the reader", async ({
     })
     .click();
   await expect(panel).toBeVisible();
+  await expect(panel).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await expect(subject).toBeVisible();
